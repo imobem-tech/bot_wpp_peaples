@@ -216,6 +216,12 @@ async function iniciarBot() {
         if (!msg?.message) continue;
 
         const tipo = obterTipoMensagem(msg);
+
+
+        if (tipo === "protocolMessage") {
+  console.log("⏭️ protocolMessage ignorada");
+  continue;
+}
         const texto = obterTextoMensagem(msg);
         const fromMe = !!msg.key?.fromMe;
         const remoteJid = msg.key?.remoteJid || "";
@@ -267,7 +273,13 @@ async function iniciarBot() {
 
             console.log("📦 Upload R2 concluído:", resultado);
           } catch (err) {
-            console.log("❌ Erro ao salvar mídia no R2:", err.message);
+            console.log("❌ Erro ao salvar no Neon:", {
+  message: err.message,
+  code: err.code,
+  detail: err.detail,
+  table: err.table,
+  constraint: err.constraint
+});
           }
         }
 
