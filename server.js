@@ -25,8 +25,8 @@ async function iniciarBot() {
   sock = makeWASocket({
     auth: state,
     logger: P({ level: "silent" }),
-    printQRInTerminal: false,
-    browser: ["Peaples Bot", "Chrome", "1.0.0"]
+    printQRInTerminal: false, 
+    browser: ["Ubuntu", "Chrome", "22.04.4"]
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -48,15 +48,31 @@ async function iniciarBot() {
       console.log("✅ WhatsApp conectado!");
     }
 
-    if (connection === "close") {
-      conectado = false;
+if (connection === "close") {
+  conectado = false;
 
-      const statusCode =
-        lastDisconnect?.error?.output?.statusCode ||
-        lastDisconnect?.error?.statusCode;
+  const statusCode =
+    lastDisconnect?.error?.output?.statusCode ||
+    lastDisconnect?.error?.statusCode;
 
-      console.log("❌ Conexão fechada. Código:", statusCode);
+  console.log("❌ Conexão fechada. Código:", statusCode);
 
+  // 🔥 TRATAMENTO DO ERRO 405
+  if (statusCode === 405) {
+    console.log("⚠️ Erro 405: sessão inválida ou rejeitada.");
+    console.log("👉 Será necessário gerar um novo QR.");
+    qrAtual = null;
+    return; // 🚫 NÃO reconecta em loop
+  }
+
+  // 🔄 Reconecta normalmente nos outros casos
+  if (statusCode !== DisconnectReason.loggedOut) {
+    console.log("🔄 Reconectando em 5 segundos...");
+    setTimeout(iniciarBot, 5000);
+  } else {
+    console.log("⚠️ Sessão deslogada. Escaneie novamente.");
+  }
+}
       if (statusCode !== DisconnectReason.loggedOut) {
         console.log("🔄 Reconectando em 5 segundos...");
         setTimeout(iniciarBot, 5000);
