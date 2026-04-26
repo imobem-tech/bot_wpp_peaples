@@ -5,6 +5,11 @@ console.log("ENV CHECK:", {
   bucket: process.env.R2_BUCKET
 });
 
+import fs from "fs";
+
+fs.rmSync("./sessions", { recursive: true, force: true });
+console.log("🧹 Sessão apagada");
+
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
