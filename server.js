@@ -1,4 +1,3 @@
-import { salvarConversa, salvarMensagem } from './db_wpp.js';
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
@@ -13,11 +12,12 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 
 import { uploadArquivo } from "./r2.js";
+import { salvarConversa, salvarMensagem } from "./db_wpp.js";
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-const AUTH_DIR = process.env.AUTH_DIR || "/app/sessions/peaples_01";
+const AUTH_DIR = process.env.AUTH_DIR || "/app/sessions/peaples_06";
 
 let sock = null;
 let qrAtual = null;
@@ -32,7 +32,8 @@ function conferirEnv() {
     bucket: process.env.R2_BUCKET || "FALTANDO",
     endpoint: process.env.R2_ENDPOINT ? "OK" : "FALTANDO",
     accessKey: process.env.R2_ACCESS_KEY_ID ? "OK" : "FALTANDO",
-    secretKey: process.env.R2_SECRET_ACCESS_KEY ? "OK" : "FALTANDO"
+    secretKey: process.env.R2_SECRET_ACCESS_KEY ? "OK" : "FALTANDO",
+    database: process.env.DATABASE_URL ? "OK" : "FALTANDO"
   });
 }
 
@@ -74,6 +75,19 @@ function obterTextoMensagem(msg) {
   );
 }
 
+function obterTimestampWhatsapp(msg) {
+  const ts = msg.messageTimestamp;
+
+  if (!ts) return new Date();
+
+  const segundos =
+    typeof ts === "object" && typeof ts.toNumber === "function"
+      ? ts.toNumber()
+      : Number(ts);
+
+  return new Date(segundos * 1000);
+}
+
 function montarNomeArquivo(msg, tipo) {
   const remoteJid = msg.key?.remoteJid || "desconhecido";
   const cleanJid = remoteJid.replace(/[^a-zA-Z0-9]/g, "_");
@@ -83,9 +97,11 @@ function montarNomeArquivo(msg, tipo) {
   if (tipo === "imageMessage") ext = "jpg";
   if (tipo === "audioMessage") ext = "ogg";
   if (tipo === "videoMessage") ext = "mp4";
+  if (tipo === "stickerMessage") ext = "webp";
+
   if (tipo === "documentMessage") {
     const fileName = msg.message?.documentMessage?.fileName || "";
-    ext = fileName.includes(".") ? fileName.split(".").pop() : "pdf";
+    ext = fileName.includes(".") ? fileName.split(".").pop() : "bin";
   }
 
   return `wpp/${cleanJid}/${Date.now()}-${tipo}.${ext}`;
@@ -96,8 +112,17 @@ function obterContentType(msg, tipo) {
   if (tipo === "audioMessage") return msg.message.audioMessage.mimetype || "audio/ogg";
   if (tipo === "videoMessage") return msg.message.videoMessage.mimetype || "video/mp4";
   if (tipo === "documentMessage") return msg.message.documentMessage.mimetype || "application/octet-stream";
+  if (tipo === "stickerMessage") return msg.message.stickerMessage.mimetype || "image/webp";
 
   return "application/octet-stream";
+}
+
+function obterNomeOriginalArquivo(msg, tipo, nomeR2) {
+  if (tipo === "documentMessage") {
+    return msg.message?.documentMessage?.fileName || nomeR2.split("/").pop();
+  }
+
+  return nomeR2.split("/").pop();
 }
 
 async function iniciarBot() {
@@ -169,7 +194,7 @@ async function iniciarBot() {
             return;
           }
 
-          console.log("⛔ 405 persistente. Acesse /reset-session e depois /qr.");
+          console.log("⛔ 405 persistente. Troque AUTH_DIR no Railway.");
           return;
         }
 
@@ -187,48 +212,89 @@ async function iniciarBot() {
     });
 
     sock.ev.on("messages.upsert", async ({ messages }) => {
-      const msg = messages?.[0];
-      if (!msg?.message) return;
+      for (const msg of messages || []) {
+        if (!msg?.message) continue;
 
-      const tipo = obterTipoMensagem(msg);
-      const texto = obterTextoMensagem(msg);
-      const fromMe = !!msg.key?.fromMe;
-      const remoteJid = msg.key?.remoteJid || "";
-      const sender = msg.key?.participant || msg.key?.remoteJid || "";
+        const tipo = obterTipoMensagem(msg);
+        const texto = obterTextoMensagem(msg);
+        const fromMe = !!msg.key?.fromMe;
+        const remoteJid = msg.key?.remoteJid || "";
+        const senderJid = msg.key?.participant || msg.key?.remoteJid || "";
+        const messageId = msg.key?.id || null;
+        const timestampWhatsapp = obterTimestampWhatsapp(msg);
 
-      console.log("📨 Mensagem recebida:", {
-        tipo,
-        fromMe,
-        remoteJid,
-        sender,
-        texto: texto ? texto.substring(0, 80) : ""
-      });
+        console.log("📩 Mensagem recebida:", {
+          tipo,
+          fromMe,
+          remoteJid,
+          senderJid,
+          texto: texto ? texto.substring(0, 80) : ""
+        });
 
-      const ehMidia =
-        tipo === "imageMessage" ||
-        tipo === "audioMessage" ||
-        tipo === "videoMessage" ||
-        tipo === "documentMessage" ||
-        tipo === "stickerMessage";
+        let r2Bucket = null;
+        let r2Key = null;
+        let r2UrlInterna = null;
+        let mimeType = null;
+        let fileName = null;
+        let fileSize = null;
 
-      if (!ehMidia) return;
+        const ehMidia =
+          tipo === "imageMessage" ||
+          tipo === "audioMessage" ||
+          tipo === "videoMessage" ||
+          tipo === "documentMessage" ||
+          tipo === "stickerMessage";
 
-      try {
-        const buffer = await downloadMediaMessage(
-          msg,
-          "buffer",
-          {},
-          { logger: P({ level: "silent" }) }
-        );
+        if (ehMidia) {
+          try {
+            const buffer = await downloadMediaMessage(
+              msg,
+              "buffer",
+              {},
+              { logger: P({ level: "silent" }) }
+            );
 
-        const nomeArquivo = montarNomeArquivo(msg, tipo);
-        const contentType = obterContentType(msg, tipo);
+            const nomeArquivo = montarNomeArquivo(msg, tipo);
+            mimeType = obterContentType(msg, tipo);
+            fileName = obterNomeOriginalArquivo(msg, tipo, nomeArquivo);
+            fileSize = buffer.length;
 
-        const resultado = await uploadArquivo(buffer, nomeArquivo, contentType);
+            const resultado = await uploadArquivo(buffer, nomeArquivo, mimeType);
 
-        console.log("📁 Upload R2 concluído:", resultado);
-      } catch (err) {
-        console.log("❌ Erro ao salvar mídia no R2:", err.message);
+            r2Bucket = resultado.bucket;
+            r2Key = resultado.key;
+            r2UrlInterna = resultado.urlInterna;
+
+            console.log("📦 Upload R2 concluído:", resultado);
+          } catch (err) {
+            console.log("❌ Erro ao salvar mídia no R2:", err.message);
+          }
+        }
+
+        try {
+          await salvarConversa(remoteJid);
+
+          await salvarMensagem({
+            messageId,
+            remoteJid,
+            senderJid,
+            fromMe,
+            tipo,
+            texto,
+            timestampWhatsapp,
+            r2Bucket,
+            r2Key,
+            r2UrlInterna,
+            mimeType,
+            fileName,
+            fileSize,
+            rawJson: msg
+          });
+
+          console.log("💾 Mensagem salva no Neon:", messageId);
+        } catch (err) {
+          console.log("❌ Erro ao salvar no Neon:", err.message);
+        }
       }
     });
   } catch (err) {
@@ -254,6 +320,9 @@ app.get("/status", (req, res) => {
       endpointConfigurado: !!process.env.R2_ENDPOINT,
       accessKeyConfigurada: !!process.env.R2_ACCESS_KEY_ID,
       secretConfigurada: !!process.env.R2_SECRET_ACCESS_KEY
+    },
+    neon: {
+      databaseConfigurada: !!process.env.DATABASE_URL
     }
   });
 });
