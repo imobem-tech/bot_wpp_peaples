@@ -1,3 +1,24 @@
+import pkg from "pg";
+const { Client } = pkg;
+
+async function testeBanco() {
+  try {
+    const client = new Client({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    });
+
+    await client.connect();
+    console.log("✅ BANCO CONECTADO COM SUCESSO");
+    await client.end();
+
+  } catch (err) {
+    console.log("❌ ERRO REAL DO BANCO:", err);
+  }
+}
+
+testeBanco();
+
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
