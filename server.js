@@ -4,7 +4,9 @@ import P from "pino";
 
 import makeWASocket, {
   useMultiFileAuthState,
-  DisconnectReason
+  fetchLatestBaileysVersion,
+  DisconnectReason,
+  Browsers
 } from "@whiskeysockets/baileys";
 
 const app = express();
@@ -13,65 +15,80 @@ const PORT = process.env.PORT || 8080;
 let sock = null;
 let qrAtual = null;
 let conectado = false;
+let iniciando = false;
 let ultimaAtualizacao = null;
 
-const AUTH_DIR = process.env.AUTH_DIR || "./sessions";
+const AUTH_DIR = process.env.AUTH_DIR || "/app/sessions/peaples_04";
 
 async function iniciarBot() {
+  if (iniciando) return;
+  iniciando = true;
+
   console.log("🚀 Iniciando bot WhatsApp...");
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
 
-  sock = makeWASocket({
-    auth: state,
-    logger: P({ level: "silent" }),
-    printQRInTerminal: false,
-    browser: ["Ubuntu", "Chrome", "22.04.4"]
-  });
+    sock = makeWASocket({
+      version,
+      auth: state,
+      browser: Browsers.macOS("Desktop"),
+      logger: P({ level: "silent" }),
+      syncFullHistory: false,
+      markOnlineOnConnect: false
+    });
 
-  sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, qr, lastDisconnect } = update;
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, qr, lastDisconnect } = update;
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
 
-    ultimaAtualizacao = new Date().toISOString();
+      ultimaAtualizacao = new Date().toISOString();
 
-    if (qr) {
-      conectado = false;
-      qrAtual = await QRCode.toDataURL(qr);
-      console.log("📲 QR_GERADO - acesse /qr");
-    }
+      console.log("🔥 UPDATE:", {
+        connection,
+        qr: qr ? "QR_GERADO" : undefined,
+        statusCode,
+        error: lastDisconnect?.error?.message
+      });
 
-    if (connection === "open") {
-      conectado = true;
-      qrAtual = null;
-      console.log("✅ WhatsApp conectado!");
-    }
+      if (qr) {
+        qrAtual = await QRCode.toDataURL(qr);
+        conectado = false;
+      }
 
-    if (connection === "close") {
-      conectado = false;
-
-      const statusCode =
-        lastDisconnect?.error?.output?.statusCode ||
-        lastDisconnect?.error?.statusCode;
-
-      console.log("❌ Conexão fechada. Código:", statusCode);
-
-      if (statusCode === 405) {
-        console.log("⚠️ Erro 405: sessão inválida ou rejeitada.");
-        console.log("👉 Troque AUTH_DIR para uma pasta nova, ex: /app/sessions/peaples_04");
+      if (connection === "open") {
+        console.log("✅ WhatsApp conectado!");
+        conectado = true;
         qrAtual = null;
-        return;
       }
 
-      if (statusCode !== DisconnectReason.loggedOut) {
-        console.log("🔄 Reconectando em 5 segundos...");
-        setTimeout(iniciarBot, 5000);
-      } else {
-        console.log("⚠️ Sessão deslogada. Será necessário escanear novo QR.");
+      if (connection === "close") {
+        conectado = false;
+        iniciando = false;
+
+        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+          qrAtual = null;
+          console.log("⚠️ Sessão deslogada. Use AUTH_DIR novo se precisar gerar QR limpo.");
+          return;
+        }
+
+        if (statusCode === 405) {
+          qrAtual = null;
+          console.log("⚠️ 405 detectado. Sessão/pareamento rejeitado. Use AUTH_DIR novo.");
+          return;
+        }
+
+        setTimeout(iniciarBot, 8000);
       }
-    }
-  });
+    });
+  } catch (err) {
+    console.error("💥 Erro ao iniciar bot:", err);
+    iniciando = false;
+    setTimeout(iniciarBot, 8000);
+  }
 }
 
 app.get("/", (req, res) => {
@@ -89,9 +106,7 @@ app.get("/status", (req, res) => {
 });
 
 app.get("/qr", (req, res) => {
-  if (conectado) {
-    return res.send("<h1>WhatsApp já conectado ✅</h1>");
-  }
+  if (conectado) return res.send("<h1>WhatsApp já conectado ✅</h1>");
 
   if (!qrAtual) {
     return res.send("<h1>QR ainda não gerado. Aguarde e atualize a página.</h1>");
@@ -110,21 +125,6 @@ app.get("/qr", (req, res) => {
       </body>
     </html>
   `);
-});
-
-app.get("/reset", async (req, res) => {
-  try {
-    if (sock) {
-      await sock.logout();
-    }
-
-    conectado = false;
-    qrAtual = null;
-
-    res.send("Sessão encerrada. Reinicie o serviço para gerar novo QR.");
-  } catch (err) {
-    res.status(500).send("Erro ao resetar sessão: " + err.message);
-  }
 });
 
 app.listen(PORT, () => {
