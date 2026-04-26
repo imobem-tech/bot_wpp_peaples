@@ -1,6 +1,8 @@
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { uploadArquivo } from "./r2.js";
 
 import makeWASocket, {
   useMultiFileAuthState,
