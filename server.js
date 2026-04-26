@@ -1,3 +1,4 @@
+import { salvarConversa, salvarMensagem } from './db_wpp.js';
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
