@@ -304,11 +304,15 @@ async function iniciarBot() {
           });
 
           console.log("💾 Mensagem salva no Neon:", messageId);
-        } catch (err) {
-          console.log("❌ Erro ao salvar no Neon:", err.message);
-        }
-      }
-    });
+} catch (err) {
+  console.log("❌ Erro ao salvar no Neon:", {
+    message: err.message,
+    code: err.code,
+    detail: err.detail,
+    table: err.table,
+    constraint: err.constraint
+  });
+}
   } catch (err) {
     iniciando = false;
     console.log("💥 Erro ao iniciar bot:", err.message);
