@@ -7,8 +7,8 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
     "@aws-sdk/client-s3": "latest",
+    "@whiskeysockets/baileys": "latest",
     "express": "latest",
     "pino": "latest",
     "qrcode": "latest"
