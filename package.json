@@ -7,10 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "latest",
-    "@whiskeysockets/baileys": "latest",
-    "express": "latest",
-    "pino": "latest",
-    "qrcode": "latest"
-  }
+  "@whiskeysockets/baileys": "latest",
+  "@aws-sdk/client-s3": "latest",
+  "express": "latest",
+  "pino": "latest",
+  "qrcode": "latest",
+  "pg": "latest"
+}
 }
