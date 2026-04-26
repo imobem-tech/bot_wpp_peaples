@@ -58,6 +58,7 @@ function obterTipoMensagem(msg) {
   if (m.videoMessage) return "videoMessage";
   if (m.documentMessage) return "documentMessage";
   if (m.stickerMessage) return "stickerMessage";
+  if (m.protocolMessage) return "protocolMessage";
 
   return Object.keys(m)[0];
 }
@@ -217,11 +218,11 @@ async function iniciarBot() {
 
         const tipo = obterTipoMensagem(msg);
 
-
         if (tipo === "protocolMessage") {
-  console.log("⏭️ protocolMessage ignorada");
-  continue;
-}
+          console.log("⏭️ protocolMessage ignorada");
+          continue;
+        }
+
         const texto = obterTextoMensagem(msg);
         const fromMe = !!msg.key?.fromMe;
         const remoteJid = msg.key?.remoteJid || "";
@@ -273,13 +274,10 @@ async function iniciarBot() {
 
             console.log("📦 Upload R2 concluído:", resultado);
           } catch (err) {
-            console.log("❌ Erro ao salvar no Neon:", {
-  message: err.message,
-  code: err.code,
-  detail: err.detail,
-  table: err.table,
-  constraint: err.constraint
-});
+            console.log("❌ Erro ao salvar mídia no R2:", {
+              message: err.message,
+              code: err.code
+            });
           }
         }
 
@@ -304,15 +302,17 @@ async function iniciarBot() {
           });
 
           console.log("💾 Mensagem salva no Neon:", messageId);
-} catch (err) {
-  console.log("❌ Erro ao salvar no Neon:", {
-    message: err.message,
-    code: err.code,
-    detail: err.detail,
-    table: err.table,
-    constraint: err.constraint
-  });
-}
+        } catch (err) {
+          console.log("❌ Erro ao salvar no Neon:", {
+            message: err.message,
+            code: err.code,
+            detail: err.detail,
+            table: err.table,
+            constraint: err.constraint
+          });
+        }
+      }
+    });
   } catch (err) {
     iniciando = false;
     console.log("💥 Erro ao iniciar bot:", err.message);
