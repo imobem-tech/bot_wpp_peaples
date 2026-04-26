@@ -25,7 +25,7 @@ async function iniciarBot() {
   sock = makeWASocket({
     auth: state,
     logger: P({ level: "silent" }),
-    printQRInTerminal: false, 
+    printQRInTerminal: false,
     browser: ["Ubuntu", "Chrome", "22.04.4"]
   });
 
@@ -48,31 +48,22 @@ async function iniciarBot() {
       console.log("✅ WhatsApp conectado!");
     }
 
-if (connection === "close") {
-  conectado = false;
+    if (connection === "close") {
+      conectado = false;
 
-  const statusCode =
-    lastDisconnect?.error?.output?.statusCode ||
-    lastDisconnect?.error?.statusCode;
+      const statusCode =
+        lastDisconnect?.error?.output?.statusCode ||
+        lastDisconnect?.error?.statusCode;
 
-  console.log("❌ Conexão fechada. Código:", statusCode);
+      console.log("❌ Conexão fechada. Código:", statusCode);
 
-  // 🔥 TRATAMENTO DO ERRO 405
-  if (statusCode === 405) {
-    console.log("⚠️ Erro 405: sessão inválida ou rejeitada.");
-    console.log("👉 Será necessário gerar um novo QR.");
-    qrAtual = null;
-    return; // 🚫 NÃO reconecta em loop
-  }
+      if (statusCode === 405) {
+        console.log("⚠️ Erro 405: sessão inválida ou rejeitada.");
+        console.log("👉 Troque AUTH_DIR para uma pasta nova, ex: /app/sessions/peaples_04");
+        qrAtual = null;
+        return;
+      }
 
-  // 🔄 Reconecta normalmente nos outros casos
-  if (statusCode !== DisconnectReason.loggedOut) {
-    console.log("🔄 Reconectando em 5 segundos...");
-    setTimeout(iniciarBot, 5000);
-  } else {
-    console.log("⚠️ Sessão deslogada. Escaneie novamente.");
-  }
-}
       if (statusCode !== DisconnectReason.loggedOut) {
         console.log("🔄 Reconectando em 5 segundos...");
         setTimeout(iniciarBot, 5000);
@@ -111,21 +102,10 @@ app.get("/qr", (req, res) => {
       <head>
         <title>QR WhatsApp</title>
         <meta http-equiv="refresh" content="10">
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding-top: 40px;
-          }
-          img {
-            width: 320px;
-            height: 320px;
-          }
-        </style>
       </head>
-      <body>
+      <body style="font-family: Arial; text-align: center; padding-top: 40px;">
         <h1>Escaneie o QR Code</h1>
-        <img src="${qrAtual}" />
+        <img src="${qrAtual}" style="width:320px;height:320px;" />
         <p>Esta página atualiza automaticamente.</p>
       </body>
     </html>
