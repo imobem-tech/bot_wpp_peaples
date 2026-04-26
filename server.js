@@ -1,15 +1,14 @@
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
-import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { uploadArquivo } from "./r2.js";
 
 import makeWASocket, {
   useMultiFileAuthState,
-  fetchLatestBaileysVersion,
   DisconnectReason,
-  Browsers
+  downloadMediaMessage
 } from "@whiskeysockets/baileys";
+
+import { uploadArquivo } from "./r2.js";
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -17,84 +16,114 @@ const PORT = process.env.PORT || 8080;
 let sock = null;
 let qrAtual = null;
 let conectado = false;
-let iniciando = false;
 let ultimaAtualizacao = null;
 
-const AUTH_DIR = process.env.AUTH_DIR || "/app/sessions/peaples_04";
+const AUTH_DIR = process.env.AUTH_DIR || "./sessions";
 
 async function iniciarBot() {
-  if (iniciando) return;
-  iniciando = true;
-
   console.log("🚀 Iniciando bot WhatsApp...");
 
-  try {
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    const { version } = await fetchLatestBaileysVersion();
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    sock = makeWASocket({
-      version,
-      auth: state,
-      browser: Browsers.macOS("Desktop"),
-      logger: P({ level: "silent" }),
-      syncFullHistory: false,
-      markOnlineOnConnect: false
-    });
+  sock = makeWASocket({
+    auth: state,
+    logger: P({ level: "silent" }),
+    printQRInTerminal: false,
+    browser: ["Ubuntu", "Chrome", "22.04.4"]
+  });
 
-    sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", async (update) => {
-      const { connection, qr, lastDisconnect } = update;
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
+  // 🔌 STATUS DE CONEXÃO
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, qr, lastDisconnect } = update;
 
-      ultimaAtualizacao = new Date().toISOString();
+    ultimaAtualizacao = new Date().toISOString();
 
-      console.log("🔥 UPDATE:", {
-        connection,
-        qr: qr ? "QR_GERADO" : undefined,
-        statusCode,
-        error: lastDisconnect?.error?.message
-      });
+    if (qr) {
+      conectado = false;
+      qrAtual = await QRCode.toDataURL(qr);
+      console.log("📲 QR_GERADO - acesse /qr");
+    }
 
-      if (qr) {
-        qrAtual = await QRCode.toDataURL(qr);
-        conectado = false;
-      }
+    if (connection === "open") {
+      conectado = true;
+      qrAtual = null;
+      console.log("✅ WhatsApp conectado!");
+    }
 
-      if (connection === "open") {
-        console.log("✅ WhatsApp conectado!");
-        conectado = true;
+    if (connection === "close") {
+      conectado = false;
+
+      const statusCode =
+        lastDisconnect?.error?.output?.statusCode ||
+        lastDisconnect?.error?.statusCode;
+
+      console.log("❌ Conexão fechada. Código:", statusCode);
+
+      if (statusCode === 405) {
+        console.log("⚠️ Sessão inválida — gerar novo QR");
         qrAtual = null;
+        return;
       }
 
-      if (connection === "close") {
-        conectado = false;
-        iniciando = false;
-
-        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-          qrAtual = null;
-          console.log("⚠️ Sessão deslogada. Use AUTH_DIR novo se precisar gerar QR limpo.");
-          return;
-        }
-
-        if (statusCode === 405) {
-          qrAtual = null;
-          console.log("⚠️ 405 detectado. Sessão/pareamento rejeitado. Use AUTH_DIR novo.");
-          return;
-        }
-
-        setTimeout(iniciarBot, 8000);
+      if (statusCode !== DisconnectReason.loggedOut) {
+        console.log("🔄 Reconectando...");
+        setTimeout(iniciarBot, 5000);
+      } else {
+        console.log("⚠️ Sessão deslogada.");
       }
-    });
-  } catch (err) {
-    console.error("💥 Erro ao iniciar bot:", err);
-    iniciando = false;
-    setTimeout(iniciarBot, 8000);
-  }
+    }
+  });
+
+  // 📩 CAPTURA DE MENSAGENS (AQUI ESTÁ O OURO)
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message) return;
+
+    const tipo = Object.keys(msg.message)[0];
+
+    console.log("📨 Tipo:", tipo);
+
+    try {
+      // 📌 TEXTO
+      if (tipo === "conversation") {
+        console.log("💬 Texto:", msg.message.conversation);
+      }
+
+      // 📌 MÍDIAS
+      if (
+        tipo === "imageMessage" ||
+        tipo === "audioMessage" ||
+        tipo === "videoMessage" ||
+        tipo === "documentMessage"
+      ) {
+        const buffer = await downloadMediaMessage(
+          msg,
+          "buffer",
+          {},
+          { logger: P({ level: "silent" }) }
+        );
+
+        const nomeArquivo = `${Date.now()}-${tipo}`;
+
+        const url = await uploadArquivo(
+          buffer,
+          nomeArquivo,
+          "application/octet-stream"
+        );
+
+        console.log("📁 Upload R2:", url);
+      }
+    } catch (err) {
+      console.log("❌ Erro mídia:", err);
+    }
+  });
 }
 
+// 🌐 ROTAS
 app.get("/", (req, res) => {
-  res.send("Bot WhatsApp Peaples online ✅");
+  res.send("Bot WhatsApp online ✅");
 });
 
 app.get("/status", (req, res) => {
@@ -102,34 +131,30 @@ app.get("/status", (req, res) => {
     online: true,
     whatsappConectado: conectado,
     qrDisponivel: !!qrAtual,
-    ultimaAtualizacao,
-    authDir: AUTH_DIR
+    ultimaAtualizacao
   });
 });
 
 app.get("/qr", (req, res) => {
-  if (conectado) return res.send("<h1>WhatsApp já conectado ✅</h1>");
+  if (conectado) {
+    return res.send("<h1>WhatsApp já conectado ✅</h1>");
+  }
 
   if (!qrAtual) {
-    return res.send("<h1>QR ainda não gerado. Aguarde e atualize a página.</h1>");
+    return res.send("<h1>Aguarde QR...</h1>");
   }
 
   res.send(`
     <html>
-      <head>
-        <title>QR WhatsApp</title>
-        <meta http-equiv="refresh" content="10">
-      </head>
-      <body style="font-family: Arial; text-align: center; padding-top: 40px;">
-        <h1>Escaneie o QR Code</h1>
-        <img src="${qrAtual}" style="width:320px;height:320px;" />
-        <p>Esta página atualiza automaticamente.</p>
+      <body style="text-align:center;">
+        <h1>Escaneie o QR</h1>
+        <img src="${qrAtual}" width="300"/>
       </body>
     </html>
   `);
 });
 
 app.listen(PORT, () => {
-  console.log(`🌐 Servidor rodando na porta ${PORT}`);
+  console.log(`🌐 Rodando na porta ${PORT}`);
   iniciarBot();
 });
