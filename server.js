@@ -1,3 +1,10 @@
+
+console.log("ENV CHECK:", {
+  endpoint: process.env.R2_ENDPOINT,
+  key: process.env.R2_ACCESS_KEY_ID,
+  bucket: process.env.R2_BUCKET
+});
+
 import express from "express";
 import QRCode from "qrcode";
 import P from "pino";
