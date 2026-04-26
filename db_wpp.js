@@ -1,39 +1,58 @@
-import { pool } from './db.js';
+import { pool } from "./db.js";
 
-function extrairTelefone(jid) {
+export function extrairTelefoneLimpo(jid) {
   if (!jid) return null;
-  if (jid.includes('@s.whatsapp.net')) return jid.split('@')[0];
+  if (jid.includes("@s.whatsapp.net")) return jid.split("@")[0];
   return null;
 }
 
-export async function salvarConversa(remoteJid, nome = null) {
-  const telefone = extrairTelefone(remoteJid);
-  const tipo = remoteJid.includes('@g.us') ? 'grupo' : 'individual';
+export function tipoConversa(remoteJid) {
+  if (!remoteJid) return null;
+  if (remoteJid.includes("@g.us")) return "grupo";
+  return "individual";
+}
 
-  await pool.query(`
-    INSERT INTO wwp_personas.wpp_conversas
-    (remote_jid, telefone_limpo, nome, tipo)
-    VALUES ($1, $2, $3, $4)
+export async function salvarConversa(remoteJid, nome = null) {
+  const telefoneLimpo = extrairTelefoneLimpo(remoteJid);
+  const tipo = tipoConversa(remoteJid);
+
+  await pool.query(
+    `
+    INSERT INTO wwp_personas.wpp_conversas (
+      remote_jid,
+      telefone_limpo,
+      nome,
+      tipo,
+      ativo,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      $1,
+      $2,
+      $3,
+      $4,
+      TRUE,
+      NOW() AT TIME ZONE 'America/Sao_Paulo',
+      NOW() AT TIME ZONE 'America/Sao_Paulo'
+    )
     ON CONFLICT (remote_jid)
-    DO UPDATE SET updated_at = NOW()
-  `, [remoteJid, telefone, nome, tipo]);
+    DO UPDATE SET
+      telefone_limpo = EXCLUDED.telefone_limpo,
+      nome = COALESCE(EXCLUDED.nome, wwp_personas.wpp_conversas.nome),
+      tipo = EXCLUDED.tipo,
+      ativo = TRUE,
+      updated_at = NOW() AT TIME ZONE 'America/Sao_Paulo'
+    `,
+    [remoteJid, telefoneLimpo, nome, tipo]
+  );
 }
 
 export async function salvarMensagem(dados) {
-  const {
-    messageId,
-    remoteJid,
-    senderJid,
-    fromMe,
-    tipo,
-    texto,
-    timestamp,
-    r2
-  } = dados;
+  const telefoneLimpo = extrairTelefoneLimpo(dados.remoteJid);
 
-  const telefone = extrairTelefone(remoteJid);
-
-  await pool.query(`
+  await pool.query(
+    `
     INSERT INTO wwp_personas.wpp_mensagens (
       message_id,
       remote_jid,
@@ -49,26 +68,34 @@ export async function salvarMensagem(dados) {
       mime_type,
       file_name,
       file_size,
+      created_at,
       raw_json
-    ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+    )
+    VALUES (
+      $1,$2,$3,$4,$5,$6,$7,
+      $8,
+      $9,$10,$11,$12,$13,$14,
+      NOW() AT TIME ZONE 'America/Sao_Paulo',
+      $15::jsonb
     )
     ON CONFLICT (message_id) DO NOTHING
-  `, [
-    messageId,
-    remoteJid,
-    telefone,
-    senderJid,
-    fromMe,
-    tipo,
-    texto,
-    timestamp,
-    r2?.bucket || null,
-    r2?.key || null,
-    r2?.url || null,
-    r2?.mime || null,
-    r2?.fileName || null,
-    r2?.size || null,
-    JSON.stringify(dados)
-  ]);
+    `,
+    [
+      dados.messageId,
+      dados.remoteJid,
+      telefoneLimpo,
+      dados.senderJid,
+      dados.fromMe,
+      dados.tipo,
+      dados.texto,
+      dados.timestampWhatsapp,
+      dados.r2Bucket,
+      dados.r2Key,
+      dados.r2UrlInterna,
+      dados.mimeType,
+      dados.fileName,
+      dados.fileSize,
+      JSON.stringify(dados.rawJson || {})
+    ]
+  );
 }
